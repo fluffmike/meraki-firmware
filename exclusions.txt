@@ -1,0 +1,8 @@
+# Never upgrade anything matching a line below (case-insensitive).
+# Accepts: org ID/name, network ID/name, template ID/name, device serial/name.
+# A matching device blocks its whole network/template row, since Meraki upgrades
+# the product type for the whole network at once.
+#
+# Q2XX-XXXX-XXXX
+# L_123456789012345678
+# Core-Datacenter
