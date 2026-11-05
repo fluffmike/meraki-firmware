@@ -40,7 +40,8 @@ except ImportError as exc:
     sys.exit(f"Missing dependency ({exc}). Run: pip install -r requirements.txt")
 
 BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env")
+# override=True: the key in .env wins over a stale MERAKI_API_KEY exported in the shell
+load_dotenv(BASE_DIR / ".env", override=True)
 
 
 def _path(env_name, default):
@@ -48,7 +49,7 @@ def _path(env_name, default):
     return p if p.is_absolute() else BASE_DIR / p
 
 
-API_KEY = os.getenv("MERAKI_API_KEY", "").strip()
+API_KEY = os.getenv("MERAKI_API_KEY", "").strip().strip("'\"").strip()
 OUTPUT_FILE = _path("OUTPUT_FILE", "output/meraki_inventory.xlsx")
 PLAN_FILE = _path("PLAN_FILE", "output/firmware_plan.xlsx")
 EXCLUSIONS_FILE = _path("EXCLUSIONS_FILE", "exclusions.txt")
@@ -105,7 +106,11 @@ LOCAL_TZ = None  # set in main()
 
 def get_dashboard():
     if not API_KEY:
-        sys.exit("MERAKI_API_KEY is not set. Copy .env.example to .env and add your key.")
+        sys.exit(f"MERAKI_API_KEY is not set. Copy .env.example to {BASE_DIR / '.env'} and add your key.")
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", API_KEY):
+        sys.exit(f"MERAKI_API_KEY in {BASE_DIR / '.env'} doesn't look like a Meraki key "
+                 f"(expected 40 hex characters, got {len(API_KEY)} characters starting "
+                 f"'{API_KEY[:4]}'). Check for typos, spaces or a leftover placeholder.")
     return meraki.DashboardAPI(
         API_KEY,
         suppress_logging=True,
@@ -233,7 +238,14 @@ class Collector:
             return None
 
     def collect(self, with_firmware=True):
-        orgs = self.d.organizations.getOrganizations(total_pages="all")
+        try:
+            orgs = self.d.organizations.getOrganizations(total_pages="all")
+        except meraki.APIError as exc:
+            if exc.status == 401:
+                sys.exit("Meraki rejected the API key (401 Unauthorized). The key is wrong, was revoked, "
+                         "or its account lost access. Generate a new one under My profile -> API access "
+                         f"and put it in {BASE_DIR / '.env'}.")
+            raise
         log.info("Found %d organization(s)", len(orgs))
         data = []
         for org in sorted(orgs, key=lambda o: o.get("name", "")):
